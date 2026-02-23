@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Data files
+*.csv
+
+# Virtual environments
+venv/
+
+# OS files
+.DS_Store
