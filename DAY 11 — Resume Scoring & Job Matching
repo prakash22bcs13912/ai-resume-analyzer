@@ -1,0 +1,313 @@
+# =============================================================
+# DAY 11 — Resume Scoring & Job Matching
+# Project: AI Resume Analyzer
+# Run: python3 day11_resume_scoring.py
+# =============================================================
+
+# STEP 0: Install dependencies (run once)
+# pip install spacy scikit-learn pandas
+# python3 -m spacy download en_core_web_sm
+
+import re
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+print("✅ Libraries loaded!")
+
+
+# =============================================================
+# SAMPLE JOB DESCRIPTIONS
+# (Replace with real job descriptions later)
+# =============================================================
+
+job_description_1 = """
+We are looking for a Data Scientist with experience in:
+- Python, Machine Learning, Deep Learning
+- NLP and text processing
+- TensorFlow or PyTorch
+- SQL and data analysis
+- Experience with Pandas, NumPy, Scikit-learn
+- AWS cloud experience preferred
+- Strong communication and teamwork skills
+- 2+ years of experience required
+"""
+
+job_description_2 = """
+We need a Frontend Developer with skills in:
+- JavaScript, React, Node.js
+- HTML, CSS, Tailwind CSS
+- REST APIs and MongoDB
+- Git version control
+- Figma for UI design
+- 1+ year of experience
+"""
+
+
+# =============================================================
+# SAMPLE RESUMES (from Day 10)
+# Replace text with your actual resume data or load from CSV
+# =============================================================
+
+resume_1 = """
+John Doe
+Data Scientist with 3 years of experience in machine learning and NLP.
+Skills: Python, Machine Learning, Deep Learning, NLP, TensorFlow, Keras,
+Scikit-learn, Pandas, NumPy, SQL, Git, Docker, AWS, Tableau, Power BI
+Education: B.Tech Computer Science, M.Tech Data Science IIT Delhi
+Experience: Data Scientist ABC Analytics 2022-2024, ML Intern XYZ Tech 2021-2022
+"""
+
+resume_2 = """
+Priya Sharma
+Software engineer with 1 year of experience in web development.
+Skills: JavaScript, React, Node.js, HTML, CSS, MongoDB, Express.js,
+REST APIs, Git, Postman, Firebase, Figma, Tailwind CSS
+Education: B.Tech Information Technology Chandigarh University 2023
+Experience: Frontend Developer Intern WebSolutions India 2023-2024
+"""
+
+resume_3 = """
+Rahul Verma
+Full Stack Developer with 2 years of experience.
+Skills: Python, Django, React, JavaScript, PostgreSQL, Docker, AWS,
+Git, REST APIs, HTML, CSS
+Education: B.Tech Computer Science Punjab University 2022
+Experience: Full Stack Developer TechCorp 2022-2024
+"""
+
+resumes = [
+    {"id": 1, "name": "John Doe",     "text": resume_1},
+    {"id": 2, "name": "Priya Sharma", "text": resume_2},
+    {"id": 3, "name": "Rahul Verma",  "text": resume_3},
+]
+
+
+# =============================================================
+# SKILL DATABASE (same as Day 10)
+# =============================================================
+
+SKILLS_DB = sorted([
+    "python", "java", "javascript", "c++", "typescript",
+    "machine learning", "deep learning", "nlp", "data science",
+    "scikit-learn", "tensorflow", "keras", "pytorch",
+    "pandas", "numpy", "matplotlib", "sql", "mysql", "mongodb",
+    "html", "css", "react", "node.js", "express.js", "django", "flask",
+    "rest api", "rest apis", "tailwind css", "bootstrap", "postgresql",
+    "aws", "azure", "docker", "kubernetes", "git", "linux",
+    "tableau", "power bi", "postman", "figma", "firebase", "agile",
+], key=len, reverse=True)
+
+
+def extract_skills(text):
+    text_lower = text.lower()
+    found = []
+    for skill in SKILLS_DB:
+        pattern = r'\b' + re.escape(skill) + r'\b'
+        if re.search(pattern, text_lower):
+            found.append(skill)
+    return sorted(set(found))
+
+
+# =============================================================
+# METHOD 1 — TF-IDF Cosine Similarity Score
+# Compares full resume text vs job description text
+# =============================================================
+
+def score_by_tfidf(resumes, job_description):
+    """
+    Uses TF-IDF vectorizer to convert text to numbers,
+    then computes cosine similarity between resume and JD.
+    Returns score between 0 and 100.
+    """
+    results = []
+    for r in resumes:
+        corpus = [job_description, r["text"]]
+        vectorizer = TfidfVectorizer(stop_words="english")
+        tfidf_matrix = vectorizer.fit_transform(corpus)
+        score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+        results.append({
+            "id"         : r["id"],
+            "name"       : r["name"],
+            "tfidf_score": round(score * 100, 2)
+        })
+    return pd.DataFrame(results).sort_values("tfidf_score", ascending=False)
+
+
+# =============================================================
+# METHOD 2 — Skill Match Score
+# Counts how many required skills the resume has
+# =============================================================
+
+def score_by_skills(resumes, job_description):
+    """
+    Extracts skills from both resume and JD,
+    then computes what % of JD skills are in the resume.
+    """
+    jd_skills = set(extract_skills(job_description))
+    results = []
+
+    for r in resumes:
+        resume_skills  = set(extract_skills(r["text"]))
+        matched        = jd_skills & resume_skills
+        missing        = jd_skills - resume_skills
+        score          = (len(matched) / len(jd_skills) * 100) if jd_skills else 0
+
+        results.append({
+            "id"            : r["id"],
+            "name"          : r["name"],
+            "skill_score"   : round(score, 2),
+            "matched_skills": ", ".join(sorted(matched)),
+            "missing_skills": ", ".join(sorted(missing)),
+            "matched_count" : len(matched),
+            "total_required": len(jd_skills),
+        })
+
+    return pd.DataFrame(results).sort_values("skill_score", ascending=False)
+
+
+# =============================================================
+# METHOD 3 — Combined Score (TF-IDF + Skill Match)
+# Best of both worlds — 50% each
+# =============================================================
+
+def combined_score(resumes, job_description):
+    """
+    Final score = 50% TF-IDF score + 50% skill match score
+    Gives a balanced view of resume fit.
+    """
+    tfidf_df = score_by_tfidf(resumes, job_description)
+    skill_df  = score_by_skills(resumes, job_description)
+
+    merged = tfidf_df.merge(skill_df[["id", "skill_score",
+                                       "matched_skills", "missing_skills",
+                                       "matched_count", "total_required"]],
+                             on="id")
+
+    merged["final_score"] = round(
+        (merged["tfidf_score"] * 0.5) + (merged["skill_score"] * 0.5), 2
+    )
+
+    merged["grade"] = merged["final_score"].apply(
+        lambda s: "🟢 Excellent" if s >= 70
+             else "🟡 Good"      if s >= 50
+             else "🔴 Weak"
+    )
+
+    return merged.sort_values("final_score", ascending=False)
+
+
+# =============================================================
+# RUN SCORING — JOB DESCRIPTION 1 (Data Scientist)
+# =============================================================
+
+print("\n" + "="*60)
+print("📋 JOB: Data Scientist")
+print("="*60)
+
+df_jd1 = combined_score(resumes, job_description_1)
+
+print("\n🏆 FINAL RANKING:\n")
+for _, row in df_jd1.iterrows():
+    print(f"  {row['grade']}")
+    print(f"  👤 {row['name']}")
+    print(f"  📊 Final Score  : {row['final_score']}%")
+    print(f"  📝 TF-IDF Score : {row['tfidf_score']}%")
+    print(f"  🎯 Skill Match  : {row['skill_score']}%  ({row['matched_count']}/{row['total_required']} skills)")
+    print(f"  ✅ Matched      : {row['matched_skills']}")
+    print(f"  ❌ Missing      : {row['missing_skills']}")
+    print()
+
+
+# =============================================================
+# RUN SCORING — JOB DESCRIPTION 2 (Frontend Developer)
+# =============================================================
+
+print("\n" + "="*60)
+print("📋 JOB: Frontend Developer")
+print("="*60)
+
+df_jd2 = combined_score(resumes, job_description_2)
+
+print("\n🏆 FINAL RANKING:\n")
+for _, row in df_jd2.iterrows():
+    print(f"  {row['grade']}")
+    print(f"  👤 {row['name']}")
+    print(f"  📊 Final Score  : {row['final_score']}%")
+    print(f"  📝 TF-IDF Score : {row['tfidf_score']}%")
+    print(f"  🎯 Skill Match  : {row['skill_score']}%  ({row['matched_count']}/{row['total_required']} skills)")
+    print(f"  ✅ Matched      : {row['matched_skills']}")
+    print(f"  ❌ Missing      : {row['missing_skills']}")
+    print()
+
+
+# =============================================================
+# SAVE RESULTS TO CSV
+# =============================================================
+
+df_jd1["job"] = "Data Scientist"
+df_jd2["job"] = "Frontend Developer"
+
+final_df = pd.concat([df_jd1, df_jd2], ignore_index=True)
+final_df.to_csv("day11_resume_scores.csv", index=False)
+
+print("✅ Results saved: day11_resume_scores.csv")
+print(f"   Rows: {len(final_df)}  |  Columns: {list(final_df.columns)}")
+
+
+# =============================================================
+# VISUALIZE — Score comparison bar chart
+# =============================================================
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+names  = [r["name"] for r in resumes]
+scores_jd1 = df_jd1.set_index("name").reindex(names)["final_score"].fillna(0).tolist()
+scores_jd2 = df_jd2.set_index("name").reindex(names)["final_score"].fillna(0).tolist()
+
+x      = np.arange(len(names))
+width  = 0.35
+
+fig, ax = plt.subplots(figsize=(10, 5))
+bars1 = ax.bar(x - width/2, scores_jd1, width, label="Data Scientist",     color="steelblue")
+bars2 = ax.bar(x + width/2, scores_jd2, width, label="Frontend Developer", color="coral")
+
+ax.set_xlabel("Candidates")
+ax.set_ylabel("Match Score (%)")
+ax.set_title("Day 11 — Resume Match Scores by Job Description")
+ax.set_xticks(x)
+ax.set_xticklabels(names)
+ax.set_ylim(0, 100)
+ax.legend()
+ax.axhline(y=70, color="green", linestyle="--", alpha=0.5, label="Excellent threshold")
+ax.axhline(y=50, color="orange", linestyle="--", alpha=0.5, label="Good threshold")
+
+for bar in bars1:
+    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+            f"{bar.get_height():.1f}%", ha="center", va="bottom", fontsize=9)
+for bar in bars2:
+    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+            f"{bar.get_height():.1f}%", ha="center", va="bottom", fontsize=9)
+
+plt.tight_layout()
+plt.savefig("day11_score_chart.png", dpi=150)
+plt.show()
+print("✅ Chart saved: day11_score_chart.png")
+
+print("\n🚀 Day 11 Complete!")
+print("   Next → Day 12: Recommendation Engine")
+print("   (suggest missing skills & courses to candidates)")
+
+
+# =============================================================
+# LOAD FROM YOUR DAY 10 CSV — uncomment when ready
+# =============================================================
+
+# df = pd.read_csv("day10_extracted_features.csv")
+# real_resumes = [
+#     {"id": i, "name": row["name"], "text": row["skills"] + " " + row["education"]}
+#     for i, row in df.iterrows()
+# ]
+# results = combined_score(real_resumes, job_description_1)
+# print(results)
