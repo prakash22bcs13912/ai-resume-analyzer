@@ -1,0 +1,301 @@
+# =============================================================
+# DAY 12 — Recommendation Engine
+# Project: AI Resume Analyzer
+# Run: python3 day12_recommendations.py
+# =============================================================
+
+# STEP 0: Install dependencies (run once)
+# pip install pandas scikit-learn
+
+import re
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+print("✅ Libraries loaded!")
+
+
+# =============================================================
+# SKILL DATABASE
+# =============================================================
+
+SKILLS_DB = sorted([
+    "python", "java", "javascript", "c++", "typescript",
+    "machine learning", "deep learning", "nlp", "data science",
+    "scikit-learn", "tensorflow", "keras", "pytorch", "xgboost",
+    "pandas", "numpy", "matplotlib", "seaborn", "sql", "mysql",
+    "mongodb", "postgresql", "sqlite", "redis",
+    "html", "css", "react", "node.js", "express.js", "django", "flask",
+    "rest api", "rest apis", "tailwind css", "bootstrap", "graphql",
+    "aws", "azure", "gcp", "docker", "kubernetes", "git", "linux",
+    "tableau", "power bi", "postman", "figma", "firebase", "agile",
+], key=len, reverse=True)
+
+
+# =============================================================
+# COURSE RECOMMENDATIONS DATABASE
+# Each skill maps to a free/paid course link
+# =============================================================
+
+COURSE_DB = {
+    "python"            : ("Python for Everybody",           "https://www.coursera.org/specializations/python"),
+    "machine learning"  : ("ML by Andrew Ng",                "https://www.coursera.org/learn/machine-learning"),
+    "deep learning"     : ("Deep Learning Specialization",   "https://www.coursera.org/specializations/deep-learning"),
+    "nlp"               : ("NLP Specialization - Coursera",  "https://www.coursera.org/specializations/natural-language-processing"),
+    "tensorflow"        : ("TensorFlow Developer Certificate","https://www.coursera.org/professional-certificates/tensorflow-in-practice"),
+    "pytorch"           : ("PyTorch for Deep Learning",      "https://www.youtube.com/watch?v=Z_ikDlimN6A"),
+    "scikit-learn"      : ("Scikit-learn Crash Course",      "https://www.youtube.com/watch?v=0B5eIE_1vpU"),
+    "pandas"            : ("Pandas Tutorial - Kaggle",       "https://www.kaggle.com/learn/pandas"),
+    "numpy"             : ("NumPy Tutorial",                 "https://numpy.org/learn/"),
+    "sql"               : ("SQL for Data Science - Coursera","https://www.coursera.org/learn/sql-for-data-science"),
+    "docker"            : ("Docker for Beginners",           "https://www.youtube.com/watch?v=fqMOX6JJhGo"),
+    "aws"               : ("AWS Cloud Practitioner",         "https://aws.amazon.com/training/digital/aws-cloud-practitioner-essentials/"),
+    "azure"             : ("Azure Fundamentals",             "https://learn.microsoft.com/en-us/training/paths/azure-fundamentals/"),
+    "git"               : ("Git & GitHub Crash Course",      "https://www.youtube.com/watch?v=RGOj5yH7evk"),
+    "react"             : ("React JS Full Course",           "https://www.youtube.com/watch?v=bMknfKXIFA8"),
+    "node.js"           : ("Node.js Tutorial",               "https://www.youtube.com/watch?v=TlB_eWDSMt4"),
+    "javascript"        : ("JavaScript Full Course",         "https://www.youtube.com/watch?v=PkZNo7MFNFg"),
+    "html"              : ("HTML & CSS Full Course",         "https://www.youtube.com/watch?v=mU6anWqZJcc"),
+    "css"               : ("CSS Full Course",                "https://www.youtube.com/watch?v=OXGznpKZ_sA"),
+    "django"            : ("Django Web Framework",           "https://www.youtube.com/watch?v=F5mRW0jo-U4"),
+    "flask"             : ("Flask Tutorial",                 "https://www.youtube.com/watch?v=Z1RJmh_OqeA"),
+    "mongodb"           : ("MongoDB Crash Course",           "https://www.youtube.com/watch?v=-56x56UppqQ"),
+    "postgresql"        : ("PostgreSQL Tutorial",            "https://www.youtube.com/watch?v=qw--VYLpxG4"),
+    "kubernetes"        : ("Kubernetes for Beginners",       "https://www.youtube.com/watch?v=X48VuDVv0do"),
+    "tableau"           : ("Tableau Training",               "https://www.tableau.com/learn/training"),
+    "power bi"          : ("Power BI Tutorial",              "https://www.youtube.com/watch?v=TmhQCQr_0Mw"),
+    "figma"             : ("Figma UI Design Tutorial",       "https://www.youtube.com/watch?v=FTFaQWZBqQ8"),
+    "data science"      : ("Data Science Specialization",   "https://www.coursera.org/specializations/jhu-data-science"),
+    "xgboost"           : ("XGBoost Tutorial",               "https://www.youtube.com/watch?v=OtD8wVaFm6E"),
+    "keras"             : ("Keras Deep Learning",            "https://www.youtube.com/watch?v=qFJeN9V1ZsI"),
+    "typescript"        : ("TypeScript Full Course",         "https://www.youtube.com/watch?v=30LWjhZzg50"),
+    "graphql"           : ("GraphQL Full Course",            "https://www.youtube.com/watch?v=ed8SzALpx1Q"),
+    "firebase"          : ("Firebase Tutorial",              "https://www.youtube.com/watch?v=9kRgVxULbag"),
+    "linux"             : ("Linux Command Line Basics",      "https://www.youtube.com/watch?v=ZtqBQ68cfJc"),
+    "agile"             : ("Agile Scrum for Beginners",      "https://www.youtube.com/watch?v=2XLKF9LkjNw"),
+    "rest api"          : ("REST API Tutorial",              "https://www.youtube.com/watch?v=qbLc5a9jdXo"),
+    "tailwind css"      : ("Tailwind CSS Full Course",       "https://www.youtube.com/watch?v=dFgzHOX84xQ"),
+}
+
+
+# =============================================================
+# HELPER FUNCTIONS
+# =============================================================
+
+def extract_skills(text):
+    text_lower = text.lower()
+    found = []
+    for skill in SKILLS_DB:
+        pattern = r'\b' + re.escape(skill) + r'\b'
+        if re.search(pattern, text_lower):
+            found.append(skill)
+    return sorted(set(found))
+
+
+def get_missing_skills(resume_text, job_description):
+    """Find skills in JD that are missing from resume."""
+    jd_skills     = set(extract_skills(job_description))
+    resume_skills = set(extract_skills(resume_text))
+    matched = jd_skills & resume_skills
+    missing = jd_skills - resume_skills
+    return sorted(matched), sorted(missing)
+
+
+def get_course_recommendations(missing_skills):
+    """
+    For each missing skill, find the best course recommendation.
+    Returns list of dicts with skill, course name, and URL.
+    """
+    recommendations = []
+    for skill in missing_skills:
+        if skill in COURSE_DB:
+            course_name, url = COURSE_DB[skill]
+            recommendations.append({
+                "skill"      : skill,
+                "course"     : course_name,
+                "url"        : url,
+                "platform"   : "Coursera" if "coursera" in url
+                          else "YouTube"  if "youtube" in url
+                          else "Kaggle"   if "kaggle"  in url
+                          else "Official",
+                "free"       : "✅ Free" if any(x in url for x in
+                               ["youtube", "kaggle", "numpy", "microsoft", "aws"])
+                          else "💳 Paid (audit free)",
+            })
+        else:
+            recommendations.append({
+                "skill"   : skill,
+                "course"  : f"Search '{skill} tutorial' on YouTube",
+                "url"     : f"https://www.youtube.com/results?search_query={skill}+tutorial",
+                "platform": "YouTube",
+                "free"    : "✅ Free",
+            })
+    return recommendations
+
+
+def generate_resume_tips(resume_text, job_description, final_score):
+    """Generate actionable tips based on score."""
+    tips = []
+
+    if final_score < 50:
+        tips.append("📝 Rewrite your resume summary to match the job title exactly.")
+        tips.append("🔑 Add a dedicated 'Skills' section with keywords from the job description.")
+        tips.append("📊 Quantify your achievements — e.g. 'Improved accuracy by 15%'.")
+
+    elif final_score < 70:
+        tips.append("✨ Add the missing skills to your resume after learning them.")
+        tips.append("📋 Mirror the exact keywords from the job description.")
+        tips.append("💼 Add more details to your experience section.")
+
+    else:
+        tips.append("🎯 Your resume is strong! Customize the summary for this role.")
+        tips.append("🌟 Highlight your most relevant projects at the top.")
+        tips.append("🤝 Make sure your LinkedIn matches your resume.")
+
+    # Word count tip
+    word_count = len(resume_text.split())
+    if word_count < 200:
+        tips.append("📄 Your resume seems short. Add more details about your experience.")
+    elif word_count > 800:
+        tips.append("✂️ Your resume might be too long. Try to keep it to 1-2 pages.")
+
+    return tips
+
+
+def full_recommendation_report(resume_text, job_description, candidate_name="Candidate"):
+    """Run the full recommendation pipeline."""
+
+    # Score
+    vectorizer  = TfidfVectorizer(stop_words="english")
+    tfidf       = vectorizer.fit_transform([job_description, resume_text])
+    tfidf_score = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0] * 100
+
+    jd_skills     = set(extract_skills(job_description))
+    resume_skills = set(extract_skills(resume_text))
+    matched       = sorted(jd_skills & resume_skills)
+    missing       = sorted(jd_skills - resume_skills)
+    skill_score   = (len(matched) / len(jd_skills) * 100) if jd_skills else 0
+    final_score   = round((tfidf_score * 0.5) + (skill_score * 0.5), 1)
+
+    grade = (
+        "🟢 Excellent" if final_score >= 70 else
+        "🟡 Good"      if final_score >= 50 else
+        "🔴 Needs Work"
+    )
+
+    # Courses
+    courses = get_course_recommendations(missing)
+
+    # Tips
+    tips = generate_resume_tips(resume_text, job_description, final_score)
+
+    return {
+        "candidate"   : candidate_name,
+        "final_score" : final_score,
+        "grade"       : grade,
+        "matched"     : matched,
+        "missing"     : missing,
+        "courses"     : courses,
+        "tips"        : tips,
+    }
+
+
+# =============================================================
+# SAMPLE DATA — test the engine
+# =============================================================
+
+resume_1 = """
+John Doe | john.doe@email.com
+Data Scientist with 3 years of experience in machine learning and NLP.
+Skills: Python, Machine Learning, Deep Learning, NLP, TensorFlow, Keras,
+Scikit-learn, Pandas, NumPy, SQL, Git, Docker, AWS, Tableau, Power BI
+Education: B.Tech Computer Science, M.Tech Data Science IIT Delhi
+"""
+
+resume_2 = """
+Priya Sharma | priya.sharma@gmail.com
+Software engineer with 1 year of experience in web development.
+Skills: JavaScript, React, Node.js, HTML, CSS, MongoDB, Express.js,
+REST APIs, Git, Postman, Firebase, Figma, Tailwind CSS
+Education: B.Tech Information Technology Chandigarh University 2023
+"""
+
+job_description = """
+Looking for a Data Scientist with:
+Python, Machine Learning, Deep Learning, NLP, PyTorch,
+SQL, AWS, Docker, Data Science, Scikit-learn, Pandas
+2+ years experience required.
+"""
+
+resumes = [
+    {"name": "John Doe",    "text": resume_1},
+    {"name": "Priya Sharma","text": resume_2},
+]
+
+
+# =============================================================
+# RUN RECOMMENDATION ENGINE
+# =============================================================
+
+print("\n" + "="*60)
+print("🤖 AI RESUME ANALYZER — DAY 12: RECOMMENDATION ENGINE")
+print("="*60)
+
+all_results = []
+
+for r in resumes:
+    report = full_recommendation_report(r["text"], job_description, r["name"])
+
+    print(f"\n{'='*60}")
+    print(f"👤 Candidate : {report['candidate']}")
+    print(f"📊 Score     : {report['final_score']}%  {report['grade']}")
+    print(f"✅ Matched   : {', '.join(report['matched']) or 'None'}")
+    print(f"❌ Missing   : {', '.join(report['missing']) or 'None'}")
+
+    print(f"\n📚 COURSE RECOMMENDATIONS:")
+    for i, c in enumerate(report["courses"], 1):
+        print(f"  {i}. [{c['free']}] {c['skill'].upper()}")
+        print(f"     Course  : {c['course']}")
+        print(f"     Platform: {c['platform']}")
+        print(f"     Link    : {c['url']}")
+
+    print(f"\n💡 RESUME TIPS:")
+    for tip in report["tips"]:
+        print(f"  {tip}")
+
+    all_results.append({
+        "candidate"      : report["candidate"],
+        "final_score"    : report["final_score"],
+        "grade"          : report["grade"],
+        "matched_skills" : ", ".join(report["matched"]),
+        "missing_skills" : ", ".join(report["missing"]),
+        "recommended_courses": " | ".join([c["course"] for c in report["courses"]]),
+        "tips"           : " | ".join(report["tips"]),
+    })
+
+
+# =============================================================
+# SAVE RESULTS
+# =============================================================
+
+df = pd.DataFrame(all_results)
+df.to_csv("day12_recommendations.csv", index=False)
+print(f"\n✅ Saved: day12_recommendations.csv")
+print(f"   Rows: {len(df)}  |  Columns: {list(df.columns)}")
+print("\n🚀 Day 12 Complete!")
+print("   Next → Day 13: Streamlit UI (already built!)")
+print("   Next → Day 14: Deploy to Hugging Face Spaces")
+
+
+# =============================================================
+# LOAD FROM DAY 11 CSV — uncomment when ready
+# =============================================================
+
+# df = pd.read_csv("day11_resume_scores.csv")
+# for _, row in df.iterrows():
+#     report = full_recommendation_report(
+#         row["resume_text"],
+#         your_job_description,
+#         row["name"]
+#     )
+#     print(report)
