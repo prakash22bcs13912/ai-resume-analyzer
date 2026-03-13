@@ -1,1 +1,197 @@
+# =============================================================
+# DAY 10 — NLP-Based Skill Extraction with spaCy
+# Project: AI Resume Analyzer
+# Run: python day10_nlp_skill_extraction.py
+# =============================================================
+# STEP 0: Install dependencies (run once in terminal)
+# pip install spacy pandas matplotlib
+# python -m spacy download en_core_web_sm
+import re
+import spacy
+import pandas as pd
+import matplotlib.pyplot as plt
+from collections import Counter
+# ── Load spaCy model ──────────────────────────────────────────
+nlp = spacy.load("en_core_web_sm")
+print("✅ spaCy loaded:", spacy.__version__)
+# =============================================================
+# SAMPLE RESUMES (replace with your real data later)
+# =============================================================
+resume_1 = """
+John Doe
+Email: john.doe@email.com | Phone: +91-9876543210
+SUMMARY
+Data Scientist with 3 years of experience in machine learning and NLP.
+Proficient in Python, scikit-learn, TensorFlow, and SQL.
+SKILLS
+Python, Machine Learning, Deep Learning, NLP, TensorFlow, Keras, Scikit-learn,
+Pandas, NumPy, SQL, Git, Docker, AWS, Tableau, Power BI
+EDUCATION
+B.Tech in Computer Science — Punjab Technical University, 2021
+M.Tech in Data Science — IIT Delhi, 2023
+EXPERIENCE
+Data Scientist — ABC Analytics Pvt Ltd (2022–2024)
+- Built NLP pipelines for resume parsing and classification
+- Developed ML models achieving 92% accuracy
+ML Intern — XYZ Tech (2021–2022)
+- Built recommendation systems using collaborative filtering
+"""
+resume_2 = """
+Priya Sharma
+priya.sharma@gmail.com | Mohali, Punjab
+OBJECTIVE
+Aspiring software engineer with 1 year of experience in web development.
+TECHNICAL SKILLS
+JavaScript, React, Node.js, HTML, CSS, MongoDB, Express.js,
+REST APIs, Git, Postman, Firebase, Figma
+EDUCATION
+B.Tech in Information Technology — Chandigarh University, 2023
+EXPERIENCE
+Frontend Developer Intern — WebSolutions India (2023–2024)
+- Developed responsive UI using React and Tailwind CSS
+- Integrated REST APIs with Axios
+"""
+resumes = [
+    {"id": 1, "name": "John Doe",     "text": resume_1},
+    {"id": 2, "name": "Priya Sharma", "text": resume_2},
+]
+# =============================================================
+# EXTRACTOR 1 — Named Entity Recognition (spaCy)
+# =============================================================
+def extract_named_entities(text):
+    doc = nlp(text)
+    entities = {"PERSON": [], "ORG": [], "DATE": [], "GPE": []}
+    for ent in doc.ents:
+        if ent.label_ in entities:
+            clean = ent.text.strip()
+            if clean and clean not in entities[ent.label_]:
+                entities[ent.label_].append(clean)
+    return entities
+# =============================================================
+# EXTRACTOR 2 — Skill Keyword Matching
+# =============================================================
+SKILLS_DB = sorted([
+    # Programming
+    "python", "java", "javascript", "c++", "c#", "r", "scala", "typescript",
+    # Data / ML
+    "machine learning", "deep learning", "nlp", "natural language processing",
+    "data science", "data analysis", "scikit-learn", "tensorflow", "keras",
+    "pytorch", "xgboost", "pandas", "numpy", "matplotlib", "seaborn", "plotly",
+    # Databases
+    "sql", "mysql", "postgresql", "mongodb", "sqlite", "redis",
+    # Web
+    "html", "css", "react", "node.js", "express.js", "django", "flask",
+    "rest api", "rest apis", "graphql", "tailwind css", "bootstrap",
+    # Cloud / DevOps
+    "aws", "azure", "gcp", "docker", "kubernetes", "git", "ci/cd", "linux",
+    # Tools
+    "tableau", "power bi", "excel", "postman", "figma", "firebase", "agile",
+], key=len, reverse=True)
+def extract_skills(text):
+    text_lower = text.lower()
+    found = []
+    for skill in SKILLS_DB:
+        pattern = r'\b' + re.escape(skill) + r'\b'
+        if re.search(pattern, text_lower):
+            found.append(skill)
+    return sorted(set(found))
+# =============================================================
+# EXTRACTOR 3 — Education
+# =============================================================
+DEGREE_REGEX = re.compile(
+    r"B\.?Tech|M\.?Tech|B\.?E\.?|M\.?E\.?|B\.?Sc\.?|M\.?Sc\.?"
+    r"|Bachelor[s]? of [A-Za-z ]+|Master[s]? of [A-Za-z ]+"
+    r"|Ph\.?D\.?|MBA|BBA|MCA|BCA",
+    re.IGNORECASE
+)
+def extract_education(text):
+    education = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if DEGREE_REGEX.search(line) and len(line) > 5:
+            education.append(line)
+    return education
+# =============================================================
+# EXTRACTOR 4 — Years of Experience
+# =============================================================
+def extract_experience_years(text):
+    explicit = re.findall(
+        r'(\d+\.?\d*)\s+(?:year[s]?|yr[s]?)\s+of\s+experience',
+        text, re.IGNORECASE
+    )
+    if explicit:
+        return float(explicit[0])
+    ranges = re.findall(r'(\d{4})\s*[–\-]\s*(\d{4})', text)
+    if ranges:
+        return sum(int(e) - int(s) for s, e in ranges)
+    return 0
+# =============================================================
+# EXTRACTOR 5 — Contact Info
+# =============================================================
+def extract_contact_info(text):
+    emails = re.findall(r'[\w.+-]+@[\w-]+\.[\w.]+', text)
+    phones = re.findall(r'(?:\+91[\-\s]?)?[6-9]\d{9}', text)
+    return {
+        "email": emails[0] if emails else None,
+        "phone": phones[0] if phones else None,
+    }
+# =============================================================
+# FULL PIPELINE
+# =============================================================
+def process_resume(r):
+    text    = r["text"]
+    contact = extract_contact_info(text)
+    skills  = extract_skills(text)
+    edu     = extract_education(text)
+    yrs     = extract_experience_years(text)
+    ents    = extract_named_entities(text)
+    return {
+        "id"              : r["id"],
+        "name"            : r["name"],
+        "email"           : contact["email"],
+        "phone"           : contact["phone"],
+        "skills"          : ", ".join(skills),
+        "skill_count"     : len(skills),
+        "education"       : " | ".join(edu),
+        "experience_years": yrs,
+        "orgs_mentioned"  : ", ".join(ents["ORG"]),
+        "locations"       : ", ".join(ents["GPE"]),
+    }
+print("\n🔄 Running pipeline on all resumes...\n")
+results = [process_resume(r) for r in resumes]
+df = pd.DataFrame(results)
+print(df.to_string(index=False))
+# =============================================================
+# SKILL FREQUENCY CHART
+# =============================================================
+all_skills = []
+for r in resumes:
+    all_skills.extend(extract_skills(r["text"]))
+skill_counts = Counter(all_skills).most_common(20)
+skills_df = pd.DataFrame(skill_counts, columns=["Skill", "Count"])
+plt.figure(figsize=(10, 5))
+plt.barh(skills_df["Skill"][::-1], skills_df["Count"][::-1], color="steelblue")
+plt.xlabel("Frequency across resumes")
+plt.title("Day 10 — Top Skills Frequency")
+plt.tight_layout()
+plt.savefig("day10_skill_frequency.png", dpi=150)
+plt.show()
+print("\n✅ Chart saved: day10_skill_frequency.png")
+# =============================================================
+# SAVE TO CSV
+# =============================================================
+df.to_csv("day10_extracted_features.csv", index=False)
+print("✅ Data saved: day10_extracted_features.csv")
+print(f"   Rows: {len(df)}  |  Columns: {list(df.columns)}")
+# =============================================================
+# TO USE YOUR OWN DATASET — uncomment below
+# =============================================================
+# existing_df = pd.read_csv("your_cleaned_resumes.csv")   # from Day 5
+# real_resumes = [
+#     {"id": i, "name": f"Resume_{i}", "text": row["resume_text"]}
+#     for i, row in existing_df.iterrows()
+# ]
+# results = [process_resume(r) for r in real_resumes]
+# pd.DataFrame(results).to_csv("day10_extracted_features.csv", index=False)
+# print("Done!") 
 
