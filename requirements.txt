@@ -5,3 +5,4 @@ pyresparser
 matplotlib
 pdfplumber
 scikit-learn
+PyMuPDF
