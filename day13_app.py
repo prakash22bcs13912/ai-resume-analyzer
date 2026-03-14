@@ -26,9 +26,18 @@ st.set_page_config(
 )
 
 # ── Load spaCy ────────────────────────────────────────────────
+
+import os
+import subprocess
+
 @st.cache_resource
 def load_nlp():
-    return spacy.load("en_core_web_sm")
+    try:
+        return spacy.load("en_core_web_sm")
+    except:
+        # Model lekapothe automatic ga download chestundi
+        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+        return spacy.load("en_core_web_sm")
 
 nlp = load_nlp()
 
