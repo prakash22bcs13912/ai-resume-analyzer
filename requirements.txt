@@ -2,3 +2,6 @@ streamlit
 pandas
 spacy
 pyresparser
+matplotlib
+pdfplumber
+scikit-learn
