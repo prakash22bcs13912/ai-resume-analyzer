@@ -1,7 +1,8 @@
 streamlit
 pandas
-spacy
-pyresparser
+spacy==3.7.4
+thinc==8.2.3
+numpy<2.0.0
 matplotlib
 pdfplumber
 scikit-learn
