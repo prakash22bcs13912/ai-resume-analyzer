@@ -13,7 +13,7 @@ import spacy
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import pdfplumber
+import fitz  # pymupdf
 from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -55,11 +55,10 @@ SKILLS_DB = sorted([
 # =============================================================
 
 def extract_text_from_pdf(uploaded_file):
-    """Extract text from uploaded PDF resume."""
     text = ""
-    with pdfplumber.open(uploaded_file) as pdf:
-        for page in pdf.pages:
-            text += page.extract_text() or ""
+    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    for page in doc:
+        text += page.get_text()
     return text
 
 
