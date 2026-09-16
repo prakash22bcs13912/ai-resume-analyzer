@@ -5,7 +5,7 @@
 # =============================================================
 
 # STEP 0: Install dependencies (run once)
-# pip install streamlit spacy scikit-learn pandas matplotlib pdfplumber
+# pip install streamlit spacy scikit-learn pandas matplotlib pymupdf
 # python3 -m spacy download en_core_web_sm
 
 import re
@@ -47,7 +47,7 @@ nlp = load_nlp()
 # =============================================================
 
 SKILLS_DB = sorted([
-    "python", "java", "javascript", "c++", "typescript",
+    "python", "java", "javascript", "c++", "typescript", "c#",
     "machine learning", "deep learning", "nlp", "data science",
     "scikit-learn", "tensorflow", "keras", "pytorch", "xgboost",
     "pandas", "numpy", "matplotlib", "seaborn", "sql", "mysql",
@@ -56,6 +56,7 @@ SKILLS_DB = sorted([
     "rest api", "rest apis", "tailwind css", "bootstrap", "graphql",
     "aws", "azure", "gcp", "docker", "kubernetes", "git", "linux",
     "tableau", "power bi", "postman", "figma", "firebase", "agile",
+    "ci/cd", "ci cd",
 ], key=len, reverse=True)
 
 
@@ -75,7 +76,7 @@ def extract_skills(text):
     text_lower = text.lower()
     found = []
     for skill in SKILLS_DB:
-        pattern = r'\b' + re.escape(skill) + r'\b'
+        pattern = r'(?<![a-zA-Z0-9])' + re.escape(skill) + r'(?![a-zA-Z0-9])'
         if re.search(pattern, text_lower):
             found.append(skill)
     return sorted(set(found))
@@ -109,12 +110,10 @@ def extract_contact(text):
 
 def score_resume(resume_text, job_description):
     """Compute TF-IDF + skill match combined score."""
-    # TF-IDF score
     vectorizer  = TfidfVectorizer(stop_words="english")
     tfidf       = vectorizer.fit_transform([job_description, resume_text])
     tfidf_score = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0] * 100
 
-    # Skill match score
     jd_skills     = set(extract_skills(job_description))
     resume_skills = set(extract_skills(resume_text))
     matched       = jd_skills & resume_skills
@@ -143,12 +142,10 @@ def score_resume(resume_text, job_description):
 # STREAMLIT UI
 # =============================================================
 
-# ── Header ────────────────────────────────────────────────────
 st.title("📄 AI Resume Analyzer")
 st.markdown("Upload your resume and paste a job description to get your **match score, skill analysis, and recommendations.**")
 st.divider()
 
-# ── Layout: two columns ───────────────────────────────────────
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -174,11 +171,9 @@ with col2:
 
 st.divider()
 
-# ── Analyze button ────────────────────────────────────────────
 analyze = st.button("🔍 Analyze Resume", type="primary", use_container_width=True)
 
 if analyze:
-    # Get resume text
     resume_text = ""
     if uploaded_file:
         with st.spinner("Reading PDF..."):
@@ -195,8 +190,6 @@ if analyze:
         st.stop()
 
     with st.spinner("Analyzing resume..."):
-
-        # Extract info
         skills      = extract_skills(resume_text)
         education   = extract_education(resume_text)
         exp_years   = extract_experience_years(resume_text)
@@ -205,7 +198,6 @@ if analyze:
 
     st.divider()
 
-    # ── Score display ─────────────────────────────────────────
     st.subheader("🏆 Match Score")
 
     c1, c2, c3, c4 = st.columns(4)
@@ -214,12 +206,10 @@ if analyze:
     c3.metric("Skill Match",   f"{scores['skill_score']}%")
     c4.metric("Grade",          scores["grade"])
 
-    # Score progress bar
     st.progress(int(scores["final_score"]))
 
     st.divider()
 
-    # ── Two column results ────────────────────────────────────
     r1, r2 = st.columns(2)
 
     with r1:
@@ -254,7 +244,6 @@ if analyze:
 
     st.divider()
 
-    # ── Skill chart ───────────────────────────────────────────
     st.subheader("📊 Skill Match Chart")
 
     if scores["matched"] or scores["missing"]:
@@ -274,7 +263,6 @@ if analyze:
 
     st.divider()
 
-    # ── Recommendations ───────────────────────────────────────
     st.subheader("💡 Recommendations")
 
     if scores["final_score"] >= 70:
@@ -290,7 +278,6 @@ if analyze:
         for skill in scores["missing"]:
             st.markdown(f"- 📖 Learn **{skill}** → search on Coursera / YouTube / Udemy")
 
-    # ── Download results ──────────────────────────────────────
     st.divider()
     st.subheader("💾 Download Results")
 
@@ -315,7 +302,6 @@ if analyze:
         use_container_width=True
     )
 
-# ── Footer ────────────────────────────────────────────────────
 st.divider()
 st.markdown(
     "<center>Built with ❤️ by Jayaprakash | AI Resume Analyzer Project</center>",
