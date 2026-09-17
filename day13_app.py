@@ -1,9 +1,8 @@
 # =============================================================
-# DAY 13 — Streamlit UI for AI Resume Analyzer
+# DAY 13 — Streamlit UI for AI Resume Analyzer  (FIXED)
 # Project: AI Resume Analyzer
 # Run: streamlit run day13_app.py
 # =============================================================
-
 # STEP 0: Install dependencies (run once)
 # pip install streamlit spacy scikit-learn pandas matplotlib pymupdf
 # python3 -m spacy download en_core_web_sm
@@ -17,6 +16,7 @@ import fitz  # pymupdf
 from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from datetime import datetime
 
 # ── Page config ───────────────────────────────────────────────
 st.set_page_config(
@@ -26,7 +26,6 @@ st.set_page_config(
 )
 
 # ── Load spaCy ────────────────────────────────────────────────
-
 import os
 import subprocess
 
@@ -34,19 +33,21 @@ import subprocess
 def load_nlp():
     try:
         return spacy.load("en_core_web_sm")
-    except:
-        # Model lekapothe automatic ga download chestundi
+    except Exception:
         subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
         return spacy.load("en_core_web_sm")
 
 nlp = load_nlp()
 
-
 # =============================================================
 # SKILL DATABASE
+# FIX #1: expanded well beyond generic software/tech skills so
+# non-tech job descriptions (security, GRC, audit, finance, etc.)
+# actually get recognized instead of silently returning nothing.
 # =============================================================
 
 SKILLS_DB = sorted([
+    # Programming / dev
     "python", "java", "javascript", "c++", "typescript", "c#",
     "machine learning", "deep learning", "nlp", "data science",
     "scikit-learn", "tensorflow", "keras", "pytorch", "xgboost",
@@ -57,8 +58,27 @@ SKILLS_DB = sorted([
     "aws", "azure", "gcp", "docker", "kubernetes", "git", "linux",
     "tableau", "power bi", "postman", "figma", "firebase", "agile",
     "ci/cd", "ci cd",
+
+    # Security / GRC / Audit / Compliance
+    "iso 27001", "isms", "grc", "governance", "risk management",
+    "risk assessment", "risk assessments", "compliance",
+    "internal audit", "external audit", "audit", "audits",
+    "tprm", "third-party risk management", "vendor risk",
+    "vendor risk assessment", "security policies",
+    "governance reporting", "stakeholder management",
+    "dlp", "edr", "ngav", "casb", "pam", "pim", "pam/pim",
+    "firewalls", "waf", "email security", "proxy", "cloud security",
+    "information security", "cybersecurity", "soc 2", "nist", "gdpr",
+    "hipaa", "pci dss", "penetration testing", "vulnerability management",
+    "incident response", "siem", "soar",
 ], key=len, reverse=True)
 
+# Words too generic/short to safely auto-extract as a "skill"
+GENERIC_STOPWORDS = {
+    "role", "team", "work", "years", "experience", "strong",
+    "excellent", "ability", "skills", "environment", "candidates",
+    "candidate", "join", "requirements", "knowledge", "understanding",
+}
 
 # =============================================================
 # HELPER FUNCTIONS
@@ -73,6 +93,7 @@ def extract_text_from_pdf(uploaded_file):
 
 
 def extract_skills(text):
+    """Match against the curated SKILLS_DB list."""
     text_lower = text.lower()
     found = []
     for skill in SKILLS_DB:
@@ -80,6 +101,32 @@ def extract_skills(text):
         if re.search(pattern, text_lower):
             found.append(skill)
     return sorted(set(found))
+
+
+def extract_dynamic_keywords(text):
+    """
+    FIX #1 (continued): catches domain-specific requirement terms that
+    aren't in SKILLS_DB yet, so 'missing skills' isn't silently empty
+    just because our fixed dictionary doesn't know a term.
+    Picks up:
+      - ALL-CAPS acronyms (ISMS, TPRM, DLP, WAF, NIST...)
+      - Capitalized multi-word phrases (Third-Party Risk Management)
+    """
+    candidates = set()
+
+    # Acronyms: 2-6 uppercase letters, optionally with digits (ISO 27001)
+    for m in re.finditer(r'\b[A-Z]{2,6}(?:\s?\d{2,5})?\b', text):
+        term = m.group().strip()
+        if term.upper() == term and term.lower() not in GENERIC_STOPWORDS:
+            candidates.add(term.lower())
+
+    # Capitalized multi-word phrases, e.g. "Third-Party Risk Management"
+    for m in re.finditer(r'\b(?:[A-Z][a-zA-Z]+(?:[-/][A-Z][a-zA-Z]+)?\s+){1,4}[A-Z][a-zA-Z]+\b', text):
+        phrase = m.group().strip()
+        if len(phrase.split()) >= 2 and phrase.lower() not in GENERIC_STOPWORDS:
+            candidates.add(phrase.lower())
+
+    return candidates
 
 
 def extract_education(text):
@@ -93,12 +140,32 @@ def extract_education(text):
 
 
 def extract_experience_years(text):
+    """
+    FIX #2: the old version summed EVERY 4-digit-4-digit range found
+    anywhere in the resume (education dates, project timelines,
+    certification years...) as if they were all work experience,
+    which double-counted and could produce nonsensical totals.
+
+    New approach:
+      1. Prefer an explicit "X years of experience" statement if present.
+      2. Otherwise, take the overall span between the earliest and latest
+         plausible year mentioned (bounded to a sane range), instead of
+         summing unrelated ranges.
+    """
     explicit = re.findall(
-        r'(\d+)\s+year[s]?\s+of\s+experience', text, re.IGNORECASE)
+        r'(\d+)\s*\+?\s*year[s]?\s+of\s+experience', text, re.IGNORECASE)
     if explicit:
         return int(explicit[0])
-    ranges = re.findall(r'(\d{4})\s*[–\-]\s*(\d{4})', text)
-    return sum(int(e) - int(s) for s, e in ranges) if ranges else 0
+
+    current_year = datetime.now().year
+    years = [int(y) for y in re.findall(r'\b(19[8-9]\d|20[0-4]\d)\b', text)]
+    years = [y for y in years if 1980 <= y <= current_year]
+
+    if len(years) >= 2:
+        span = max(years) - min(years)
+        return max(0, span)
+
+    return 0
 
 
 def extract_contact(text):
@@ -110,21 +177,36 @@ def extract_contact(text):
 
 def score_resume(resume_text, job_description):
     """Compute TF-IDF + skill match combined score."""
-    vectorizer  = TfidfVectorizer(stop_words="english")
-    tfidf       = vectorizer.fit_transform([job_description, resume_text])
+    vectorizer = TfidfVectorizer(stop_words="english")
+    tfidf = vectorizer.fit_transform([job_description, resume_text])
     tfidf_score = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0] * 100
 
-    jd_skills     = set(extract_skills(job_description))
-    resume_skills = set(extract_skills(resume_text))
-    matched       = jd_skills & resume_skills
-    missing       = jd_skills - resume_skills
-    skill_score   = (len(matched) / len(jd_skills) * 100) if jd_skills else 0
+    # Curated skill list matches
+    jd_skills_curated = set(extract_skills(job_description))
+    resume_skills_curated = set(extract_skills(resume_text))
 
+    # FIX #1: also pull dynamic keywords from the JD that aren't in
+    # SKILLS_DB, and check for them (word-boundary) in the resume text.
+    jd_dynamic = extract_dynamic_keywords(job_description)
+    resume_lower = resume_text.lower()
+    dynamic_matched, dynamic_missing = set(), set()
+    for term in jd_dynamic:
+        pattern = r'(?<![a-zA-Z0-9])' + re.escape(term) + r'(?![a-zA-Z0-9])'
+        if re.search(pattern, resume_lower):
+            dynamic_matched.add(term)
+        else:
+            dynamic_missing.add(term)
+
+    jd_skills = jd_skills_curated | jd_dynamic
+    matched = resume_skills_curated & jd_skills_curated | dynamic_matched
+    missing = (jd_skills_curated - resume_skills_curated) | dynamic_missing
+
+    skill_score = (len(matched) / len(jd_skills) * 100) if jd_skills else 0
     final_score = round((tfidf_score * 0.5) + (skill_score * 0.5), 1)
 
     grade = (
         "🟢 Excellent Match" if final_score >= 70 else
-        "🟡 Good Match"      if final_score >= 50 else
+        "🟡 Good Match" if final_score >= 50 else
         "🔴 Weak Match"
     )
 
@@ -136,7 +218,6 @@ def score_resume(resume_text, job_description):
         "missing"     : sorted(missing),
         "grade"       : grade,
     }
-
 
 # =============================================================
 # STREAMLIT UI
@@ -249,12 +330,12 @@ if analyze:
     if scores["matched"] or scores["missing"]:
         fig, ax = plt.subplots(figsize=(8, 3))
         categories = ["Matched Skills", "Missing Skills"]
-        values     = [len(scores["matched"]), len(scores["missing"])]
-        colors     = ["#2ecc71", "#e74c3c"]
+        values = [len(scores["matched"]), len(scores["missing"])]
+        colors = ["#2ecc71", "#e74c3c"]
         bars = ax.barh(categories, values, color=colors, height=0.4)
         for bar, val in zip(bars, values):
             ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
-                    str(val), va="center", fontsize=12)
+                     str(val), va="center", fontsize=12)
         ax.set_xlabel("Number of Skills")
         ax.set_title("Resume Skills vs Job Requirements")
         ax.set_xlim(0, max(values) + 2)
@@ -282,15 +363,15 @@ if analyze:
     st.subheader("💾 Download Results")
 
     result_df = pd.DataFrame([{
-        "Final Score"    : scores["final_score"],
-        "TF-IDF Score"   : scores["tfidf_score"],
-        "Skill Score"    : scores["skill_score"],
-        "Grade"          : scores["grade"],
-        "Matched Skills" : ", ".join(scores["matched"]),
-        "Missing Skills" : ", ".join(scores["missing"]),
-        "Experience Yrs" : exp_years,
-        "Education"      : " | ".join(education),
-        "Email"          : email,
+        "Final Score"     : scores["final_score"],
+        "TF-IDF Score"    : scores["tfidf_score"],
+        "Skill Score"     : scores["skill_score"],
+        "Grade"           : scores["grade"],
+        "Matched Skills"  : ", ".join(scores["matched"]),
+        "Missing Skills"  : ", ".join(scores["missing"]),
+        "Experience Yrs"  : exp_years,
+        "Education"       : " | ".join(education),
+        "Email"           : email,
     }])
 
     csv = result_df.to_csv(index=False)
